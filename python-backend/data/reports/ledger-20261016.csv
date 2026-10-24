@@ -1,0 +1,5 @@
+business_reference,currency,posted_at,side,amount_minor
+funding:4ee157bb4c8c44c89698c9fbd523fb30,USD,2026-10-16 03:23:15.679556+00:00,debit,100000
+funding:4ee157bb4c8c44c89698c9fbd523fb30,USD,2026-10-16 03:23:15.679556+00:00,credit,100000
+payment:9c8803be-9a2e-4667-8fb4-dee0174db246,USD,2026-10-16 03:23:15.768931+00:00,debit,25000
+payment:9c8803be-9a2e-4667-8fb4-dee0174db246,USD,2026-10-16 03:23:15.768931+00:00,credit,25000

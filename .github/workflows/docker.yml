@@ -1,0 +1,30 @@
+name: Docker images
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Python API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./python-backend
+          file: ./python-backend/Dockerfile
+          push: false
+      - name: Build .NET API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./dotnet-backend
+          file: ./dotnet-backend/Dockerfile
+          push: false
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: false

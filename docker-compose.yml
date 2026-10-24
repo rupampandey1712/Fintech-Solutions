@@ -1,0 +1,199 @@
+name: fincore
+
+# Settings shared by both API implementations. Each service merges this map and adds its own
+# connection string. Container-to-container traffic uses service names, so host port
+# mappings below only matter for tools running on the host and can be moved freely.
+x-api-environment: &api-environment
+  CORS_ORIGINS: http://localhost:${FRONTEND_HOST_PORT:-5173}
+  JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-development-only-change-this-key}
+  JWT_ISSUER: fincore
+  JWT_AUDIENCE: fincore-client
+  DEFAULT_LIMIT_PER_TRANSACTION_MINOR: ${DEFAULT_LIMIT_PER_TRANSACTION_MINOR:-10000000}
+  DEFAULT_LIMIT_DAILY_MINOR: ${DEFAULT_LIMIT_DAILY_MINOR:-50000000}
+  DEFAULT_LIMIT_WEEKLY_MINOR: ${DEFAULT_LIMIT_WEEKLY_MINOR:-100000000}
+  DEFAULT_LIMIT_MONTHLY_MINOR: ${DEFAULT_LIMIT_MONTHLY_MINOR:-200000000}
+  BENEFICIARY_COOLING_SECONDS: ${BENEFICIARY_COOLING_SECONDS:-86400}
+  OUTBOX_WORKER_ENABLED: ${OUTBOX_WORKER_ENABLED:-true}
+  OUTBOX_POLL_SECONDS: ${OUTBOX_POLL_SECONDS:-2}
+  OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-5}
+  RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+  MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-8388608}
+  COMMON_PASSWORDS_PATH: ${COMMON_PASSWORDS_PATH:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  AGENT_MODEL: ${AGENT_MODEL:-gemini-2.5-flash}
+  AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-8}
+  AGENT_TIMEOUT_SECONDS: ${AGENT_TIMEOUT_SECONDS:-90}
+  RATE_LIMIT_AGENT_PER_MINUTE: ${RATE_LIMIT_AGENT_PER_MINUTE:-5}
+  RATE_LIMIT_LOGIN_PER_MINUTE: ${RATE_LIMIT_LOGIN_PER_MINUTE:-5}
+  RATE_LIMIT_LOGIN_PER_ACCOUNT_PER_MINUTE: ${RATE_LIMIT_LOGIN_PER_ACCOUNT_PER_MINUTE:-10}
+  RATE_LIMIT_REGISTER_PER_MINUTE: ${RATE_LIMIT_REGISTER_PER_MINUTE:-10}
+  RATE_LIMIT_PAYMENT_PER_MINUTE: ${RATE_LIMIT_PAYMENT_PER_MINUTE:-10}
+  RATE_LIMIT_DEFAULT_PER_MINUTE: ${RATE_LIMIT_DEFAULT_PER_MINUTE:-100}
+  # Shared rate-limit counters for every replica of both APIs (same key scheme in each).
+  REDIS_URL: redis://redis:6379/0
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  REFRESH_TOKEN_LIFETIME_DAYS: ${REFRESH_TOKEN_LIFETIME_DAYS:-30}
+  # Settlement fee per settled payment, in basis points (25 = 0.25%).
+  SETTLEMENT_FEE_BPS: ${SETTLEMENT_FEE_BPS:-25}
+  # Periodic reconciliation by the background worker; the API endpoint always allows manual runs.
+  RECONCILIATION_SCHEDULE_ENABLED: ${RECONCILIATION_SCHEDULE_ENABLED:-false}
+  RECONCILIATION_INTERVAL_SECONDS: ${RECONCILIATION_INTERVAL_SECONDS:-3600}
+  # Generated CSV reports (filesystem provider); blob storage is used when STORAGE_PROVIDER=blob.
+  REPORT_STORAGE_PATH: ${REPORT_STORAGE_PATH:-data/reports}
+  # Messaging: outbox -> Azure Service Bus topic -> "notifications" subscription.
+  MESSAGE_PROVIDER: ${MESSAGE_PROVIDER:-servicebus}
+  SERVICEBUS_CONNECTION_STRING: Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+  SERVICEBUS_TOPIC: fincore-events
+  SERVICEBUS_SUBSCRIPTION: notifications
+  # Storage: KYC documents go to private Azure Blob Storage (Azurite locally).
+  STORAGE_PROVIDER: ${STORAGE_PROVIDER:-blob}
+  AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+  KYC_BLOB_CONTAINER: kyc-documents
+  KYC_STORAGE_PATH: ${KYC_STORAGE_PATH:-data/kyc-documents}
+  # Traces, metrics and logs go to the observability dashboard over OTLP/gRPC.
+  # Set OTEL_EXPORTER_OTLP_ENDPOINT to empty to switch export off.
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT-http://observability:18889}
+
+services:
+  postgres:
+    image: postgres:16.15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fincore}
+      POSTGRES_USER: ${POSTGRES_USER:-fincore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fincore} -d ${POSTGRES_DB:-fincore}"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7.2.16-alpine
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The Service Bus emulator stores its entities in SQL Server; nothing else uses this database.
+  servicebus-sql:
+    image: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SERVICEBUS_SQL_PASSWORD:-Local_only_Change-me_1}
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:2.0.1
+    environment:
+      SQL_SERVER: servicebus-sql
+      MSSQL_SA_PASSWORD: ${SERVICEBUS_SQL_PASSWORD:-Local_only_Change-me_1}
+      ACCEPT_EULA: "Y"
+      SQL_WAIT_INTERVAL: 5
+    volumes:
+      - ./infrastructure/servicebus/config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+    ports:
+      - "${SERVICEBUS_AMQP_HOST_PORT:-5673}:5672"
+      - "${SERVICEBUS_HTTP_HOST_PORT:-5301}:5300"
+    depends_on:
+      servicebus-sql:
+        condition: service_healthy
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    command: ["azurite-blob", "--blobHost", "0.0.0.0", "--location", "/data", "--silent", "--disableTelemetry", "--skipApiVersionCheck"]
+    ports:
+      - "${AZURITE_BLOB_HOST_PORT:-10010}:10000"
+    volumes:
+      - azurite-data:/data
+
+  # Local observability: one UI for traces, metrics and structured logs from both APIs (OTLP).
+  # In-memory and unauthenticated by design; in Azure the same OTLP data goes to Azure Monitor.
+  observability:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:13.6.1
+    environment:
+      ASPIRE_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "${OBSERVABILITY_HOST_PORT:-18888}:18888"
+
+  python-api:
+    build:
+      context: ./python-backend
+      dockerfile: Dockerfile
+    environment:
+      <<: *api-environment
+      APP_ENV: development
+      OTEL_SERVICE_NAME: fincore-python-api
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fincore}:${POSTGRES_PASSWORD:-local-only-change-me}@postgres:5432/${POSTGRES_DB:-fincore}
+    ports:
+      - "${PYTHON_API_HOST_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      servicebus:
+        condition: service_started
+      azurite:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  dotnet-api:
+    build:
+      context: ./dotnet-backend
+      dockerfile: Dockerfile
+    environment:
+      <<: *api-environment
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: 8080
+      OTEL_SERVICE_NAME: fincore-dotnet-api
+      # EF Core logs every SQL command (including the outbox poll) at Information otherwise.
+      Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore: Warning
+      ConnectionStrings__FinCore: Host=postgres;Port=5432;Database=${POSTGRES_DB:-fincore};Username=${POSTGRES_USER:-fincore};Password=${POSTGRES_PASSWORD:-local-only-change-me}
+    ports:
+      - "${DOTNET_API_HOST_PORT:-5000}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # Python owns the Alembic schema migrations; .NET starts once they have run.
+      python-api:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      VITE_PYTHON_API_URL: http://localhost:${PYTHON_API_HOST_PORT:-8000}
+      VITE_DOTNET_API_URL: http://localhost:${DOTNET_API_HOST_PORT:-5000}
+    ports:
+      - "${FRONTEND_HOST_PORT:-5173}:5173"
+    depends_on:
+      python-api:
+        condition: service_healthy
+      dotnet-api:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  azurite-data:

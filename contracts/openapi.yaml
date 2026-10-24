@@ -1,0 +1,2514 @@
+openapi: 3.1.0
+info:
+  title: FinCore API
+  version: 1.0.0
+  description: Shared contract implemented by the Python and .NET backends.
+servers:
+  - url: http://localhost:8000
+    description: Python backend default
+  - url: http://localhost:5000
+    description: .NET backend default
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Liveness probe
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string }
+  /ready:
+    get:
+      operationId: readiness
+      responses:
+        '200':
+          description: All required dependencies are reachable
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string }
+        '503':
+          description: A required dependency is unavailable
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1:
+    get:
+      operationId: apiRoot
+      responses:
+        '200':
+          description: API metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  version: { type: string }
+                  contract: { type: string }
+  /api/v1/auth/register:
+    post:
+      operationId: registerCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Customer created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '409':
+          description: Email is already registered
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/auth/login:
+    post:
+      operationId: loginCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Access token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/customers/me:
+    get:
+      operationId: getCurrentCustomer
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current customer profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '401':
+          description: Authentication required or token invalid
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/accounts:
+    get:
+      operationId: listAccounts
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Accounts owned by current customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+    post:
+      operationId: createAccount
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAccountRequest'
+      responses:
+        '201':
+          description: Account opened with zero balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '422':
+          description: Account request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/accounts/{accountId}:
+    get:
+      operationId: getAccount
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Account and ledger-derived balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '404':
+          description: Account does not exist or is not owned by current customer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/beneficiaries:
+    get:
+      operationId: listBeneficiaries
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Beneficiaries owned by current customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BeneficiaryPage'
+    post:
+      operationId: createBeneficiary
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBeneficiaryRequest'
+      responses:
+        '201':
+          description: Beneficiary awaiting verification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Beneficiary'
+        '404':
+          description: Destination account not found
+        '422':
+          description: Invalid beneficiary request
+  /api/v1/beneficiaries/{beneficiaryId}/verify:
+    post:
+      operationId: verifyBeneficiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: beneficiaryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Beneficiary verified and placed in cooling period
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Beneficiary'
+        '404':
+          description: Beneficiary not found
+        '409':
+          description: Beneficiary is not awaiting verification
+  /api/v1/beneficiaries/{beneficiaryId}/activate:
+    post:
+      operationId: activateBeneficiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: beneficiaryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Beneficiary activated after cooling period
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Beneficiary'
+        '404':
+          description: Beneficiary not found
+        '409':
+          description: Verification or cooling period is incomplete
+  /api/v1/beneficiaries/{beneficiaryId}/disable:
+    post:
+      operationId: disableBeneficiary
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: beneficiaryId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Beneficiary disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Beneficiary'
+        '404':
+          description: Beneficiary not found
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Process is alive
+  /ready:
+    get:
+      operationId: readiness
+      responses:
+        '200':
+          description: Dependencies are ready
+        '503':
+          description: Required dependency unavailable
+  /api/v1/payments:
+    get:
+      operationId: listPayments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Page of payments visible to this customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentPage'
+        '422':
+          description: Pagination cursor is invalid
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    post:
+      operationId: createPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+            maxLength: 128
+          description: Scoped to the authenticated customer and payment creation operation; a different request body using the same key conflicts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+      responses:
+        '201':
+          description: Internal same-currency transfer posted atomically
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '422':
+          description: Insufficient funds, limits, currency, or request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Source account or beneficiary is not visible to this customer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Idempotency key reused with a different request or still in progress, inactive source/beneficiary, or missing ledger/limits
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/payments/{paymentId}:
+    get:
+      operationId: getPayment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Payment state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '404':
+          description: Payment does not exist or is not visible to this principal
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/auth/refresh:
+    post:
+      operationId: refreshTokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Access token issued and refresh token rotated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Refresh token is invalid, revoked, or expired
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/auth/logout:
+    post:
+      operationId: logoutCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '204':
+          description: Refresh token revoked (or unknown token ignored)
+  /api/v1/kyc:
+    post:
+      operationId: createKycApplication
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKycRequest'
+      responses:
+        '201':
+          description: KYC application created in pending state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycApplication'
+        '422':
+          description: KYC request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    get:
+      operationId: listKycApplications
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: KYC applications owned by current customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycApplicationPage'
+  /api/v1/kyc/{applicationId}:
+    get:
+      operationId: getKycApplication
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: applicationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: KYC application with documents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycApplication'
+        '404':
+          description: KYC application not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/kyc/{applicationId}/documents:
+    post:
+      operationId: addKycDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: applicationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddKycDocumentRequest'
+      responses:
+        '201':
+          description: Document stored and attached to the application
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycDocument'
+        '404':
+          description: KYC application not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Application no longer accepts documents
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Invalid or oversized document content
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/kyc/{applicationId}/submit:
+    post:
+      operationId: submitKycApplication
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: applicationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Application submitted; sanctions screening may approve or reject it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycApplication'
+        '404':
+          description: KYC application not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Application has already been submitted
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: At least one document is required before submission
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/kyc/{applicationId}/review:
+    post:
+      operationId: reviewKycApplication
+      security:
+        - bearerAuth: []
+      description: Requires the admin or fraud_analyst role.
+      parameters:
+        - name: applicationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KycReviewRequest'
+      responses:
+        '200':
+          description: Application approved or rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycApplication'
+        '403':
+          description: Caller lacks the admin or fraud_analyst role
+        '404':
+          description: KYC application not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Application is not awaiting review
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/transactions:
+    get:
+      operationId: listTransactions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: accountId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Page of ledger-derived transactions for current customer's accounts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionPage'
+        '422':
+          description: Pagination cursor is invalid
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/transactions/{lineId}:
+    get:
+      operationId: getTransaction
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: lineId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Single transaction (journal line) view
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '404':
+          description: Transaction not found for this customer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/ledger/accounts/{accountId}:
+    get:
+      operationId: getLedgerAccountStatement
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Ledger statement with derived balance and recent entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerAccountStatement'
+        '404':
+          description: Account does not exist or is not owned by current customer
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Account ledger is not configured
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/notifications:
+    get:
+      operationId: listNotifications
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Notification feed for current customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+  /api/v1/fraud/cases:
+    get:
+      operationId: listFraudCases
+      security:
+        - bearerAuth: []
+      description: Admin and fraud_analyst see all cases; other customers see only their own.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [open, investigating, escalated, closed, false_positive] }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Page of fraud cases visible to this principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudCasePage'
+        '422':
+          description: Status filter is invalid
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/fraud/agent/status:
+    get:
+      operationId: getFraudAgentStatus
+      security:
+        - bearerAuth: []
+      description: >-
+        Whether the fraud investigator agent can be used by the caller: true only when a model API
+        key is configured and the caller holds the admin or fraud_analyst role.
+      responses:
+        '200':
+          description: Agent availability
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentStatus'
+  /api/v1/fraud/cases/{caseId}/investigate:
+    post:
+      operationId: investigateFraudCase
+      security:
+        - bearerAuth: []
+      description: >-
+        Requires the admin or fraud_analyst role. Runs the fraud investigator agent: it reads the
+        case with read-only tools scoped to that case and drafts a recommendation. Nothing is
+        changed; the reviewer decides through reviewFraudCase. Audited as fraud.case.investigated.
+        Rate limited in its own bucket (RATE_LIMIT_AGENT_PER_MINUTE).
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The agent's draft recommendation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Investigation'
+        '403':
+          description: Caller lacks the admin or fraud_analyst role
+        '404':
+          description: Fraud case not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Case is already resolved
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '502':
+          description: >-
+            agent_failed (the model provider failed) or agent_incomplete (the agent ended without
+            a report, e.g. it used up its turn budget)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: agent_not_configured (no model API key is set)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '504':
+          description: agent_timeout (the investigation exceeded AGENT_TIMEOUT_SECONDS)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/fraud/cases/{caseId}/review:
+    post:
+      operationId: reviewFraudCase
+      security:
+        - bearerAuth: []
+      description: >-
+        Requires the admin or fraud_analyst role. Settles the case's held payment in the same
+        transaction: false_positive releases the held funds to the beneficiary (payment becomes
+        completed, payment.completed.v1); closed (confirmed fraud) returns them to the source account
+        (payment becomes rejected, payment.rejected.v1); escalated moves no money.
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FraudCaseReviewRequest'
+      responses:
+        '200':
+          description: Case resolved with the requested outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudCase'
+        '403':
+          description: Caller lacks the admin or fraud_analyst role
+        '404':
+          description: Fraud case not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Case is already resolved
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/aml/alerts:
+    get:
+      operationId: listAmlAlerts
+      security:
+        - bearerAuth: []
+      description: Admin and fraud_analyst see all alerts; other customers see only their own.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Page of AML alerts visible to this principal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlAlertPage'
+  /api/v1/reconciliation/run:
+    post:
+      operationId: runReconciliation
+      security:
+        - bearerAuth: []
+      description: Requires the admin or finance_user role; compares completed payments against the provider simulator.
+      responses:
+        '200':
+          description: Reconciliation run recorded with per-payment records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationRunResponse'
+        '403':
+          description: Caller lacks the admin or finance_user role
+  /api/v1/reconciliation/runs:
+    get:
+      operationId: listReconciliationRuns
+      security:
+        - bearerAuth: []
+      description: Requires the admin or finance_user role.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Recent reconciliation runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationRunPage'
+        '403':
+          description: Caller lacks the admin or finance_user role
+  /api/v1/reconciliation/runs/{runId}:
+    get:
+      operationId: getReconciliationRun
+      security:
+        - bearerAuth: []
+      description: Requires the admin or finance_user role.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Reconciliation run with its records
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationRunResponse'
+        '403':
+          description: Caller lacks the admin or finance_user role
+        '404':
+          description: Reconciliation run not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/reports/dashboard:
+    get:
+      operationId: getDashboardReport
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Payment, fraud, and AML totals with monthly volume
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardView'
+  /api/v1/reports/transactions:
+    get:
+      operationId: getTransactionsReport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 90, default: 30 }
+      responses:
+        '200':
+          description: Daily payment count and volume series
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionsReport'
+  /api/v1/admin/customers:
+    get:
+      operationId: listAdminCustomers
+      security:
+        - bearerAuth: []
+      description: Requires the admin or finance_user role (read-only, used to pick deposit targets).
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        '200':
+          description: Customers with roles and status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCustomerPage'
+        '403':
+          description: Caller lacks the admin role
+  /api/v1/admin/customers/{customerId}/status:
+    patch:
+      operationId: updateAdminCustomerStatus
+      security:
+        - bearerAuth: []
+      description: Requires the admin role.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerStatusRequest'
+      responses:
+        '200':
+          description: Customer status changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '403':
+          description: Caller lacks the admin role
+        '404':
+          description: Customer not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Status is invalid
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/admin/fraud-rules:
+    get:
+      operationId: listFraudRules
+      security:
+        - bearerAuth: []
+      description: Requires the admin or fraud_analyst role.
+      responses:
+        '200':
+          description: Configured fraud rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudRulePage'
+        '403':
+          description: Caller lacks the admin or fraud_analyst role
+  /api/v1/admin/fraud-rules/{code}:
+    patch:
+      operationId: updateFraudRule
+      security:
+        - bearerAuth: []
+      description: Requires the admin or fraud_analyst role; only supplied fields change.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FraudRulePatchRequest'
+      responses:
+        '200':
+          description: Fraud rule updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudRule'
+        '403':
+          description: Caller lacks the admin or fraud_analyst role
+        '404':
+          description: Fraud rule not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/admin/audit-logs:
+    get:
+      operationId: listAuditLogs
+      security:
+        - bearerAuth: []
+      description: Requires the admin role.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Recent audit log entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogPage'
+        '403':
+          description: Caller lacks the admin role
+  /api/v1/admin/accounts/{accountId}/status:
+    patch:
+      operationId: updateAdminAccountStatus
+      security:
+        - bearerAuth: []
+      description: Requires the admin role.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountStatusRequest'
+      responses:
+        '200':
+          description: Account status changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountStatusResponse'
+        '403':
+          description: Caller lacks the admin role
+        '404':
+          description: Account not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Status is invalid
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/admin/customers/{customerId}/accounts:
+    get:
+      operationId: listCustomerAccountsForTreasury
+      security:
+        - bearerAuth: []
+      description: Requires the admin or finance_user role.
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The customer's accounts with ledger balances
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminAccount' }
+        '403':
+          description: Caller lacks the admin or finance_user role
+  /api/v1/admin/accounts/{accountId}/deposits:
+    post:
+      operationId: createDeposit
+      security:
+        - bearerAuth: []
+      description: >-
+        Requires the admin or finance_user role. Posts one balanced journal (debit the currency's
+        treasury ledger, credit the account), audits it and emits account.funded.v1. Idempotent per
+        caller and Idempotency-Key; a replay returns the original response.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepositRequest'
+      responses:
+        '201':
+          description: Deposit posted (or replayed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Deposit'
+        '403':
+          description: Caller lacks the admin or finance_user role
+        '404':
+          description: Account not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Account not active, idempotency key reused with a different request, or still in progress
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Invalid amount or Idempotency-Key
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/payments/{paymentId}/refund:
+    post:
+      operationId: refundPayment
+      security:
+        - bearerAuth: []
+      description: >-
+        Requires the admin or finance_user role. Returns some or all of a completed payment from the
+        recipient to the payer as a new balanced journal (refund:<id>). Partial and repeated refunds
+        are allowed up to the original amount; the recipient must have the funds. Idempotent per
+        caller and Idempotency-Key. Emits payment.refunded.v1.
+      parameters:
+        - { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefundRequest' }
+      responses:
+        '201':
+          description: Refund posted (or replayed)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundResult' }
+        '403':
+          description: Caller lacks the admin or finance_user role
+        '404':
+          description: Payment not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Payment is not completed (payment_not_refundable), or an idempotency conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: refund_exceeds_payment, recipient_insufficient_funds, or invalid input
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/payments/{paymentId}/refunds:
+    get:
+      operationId: listPaymentRefunds
+      security:
+        - bearerAuth: []
+      description: Visible to the payer and to admin/finance_user staff.
+      parameters:
+        - { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Refunds in posting order with totals
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefundPage' }
+        '404':
+          description: Payment not found or not visible to the caller
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/payments/{paymentId}/reversal:
+    post:
+      operationId: reversePayment
+      security:
+        - bearerAuth: []
+      description: >-
+        Requires the admin or finance_user role. Corrects a completed payment posted in error by
+        mirroring every journal entry of the payment (reversal_of_id links each mirror to its
+        original; nothing is edited or deleted). The payment becomes reversed. Not allowed once the
+        payment has refunds. Emits payment.reversed.v1.
+      parameters:
+        - { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReversalRequest' }
+      responses:
+        '200':
+          description: Payment reversed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [paymentId, status, reversalJournalIds]
+                properties:
+                  paymentId: { type: string, format: uuid }
+                  status: { type: string, enum: [reversed] }
+                  reversalJournalIds: { type: array, items: { type: string, format: uuid } }
+        '403':
+          description: Caller lacks the admin or finance_user role
+        '409':
+          description: payment_not_reversible or payment_has_refunds
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/admin/journal-entries/{journalId}/reversal:
+    post:
+      operationId: reverseJournalEntry
+      security:
+        - bearerAuth: []
+      description: >-
+        Requires the admin or finance_user role. Mirrors a non-payment journal entry, such as a
+        deposit credited to the wrong account. Payment postings must use the payment reversal.
+      parameters:
+        - { name: journalId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReversalRequest' }
+      responses:
+        '200':
+          description: Entry reversed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [journalId, reversalJournalId]
+                properties:
+                  journalId: { type: string, format: uuid }
+                  reversalJournalId: { type: string, format: uuid }
+        '403':
+          description: Caller lacks the admin or finance_user role
+        '409':
+          description: already_reversed, reversal_not_reversible, or use_payment_reversal
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/admin/customers/{customerId}/payments:
+    get:
+      operationId: listCustomerPaymentsForCorrections
+      security:
+        - bearerAuth: []
+      description: Requires the admin or finance_user role. Latest 100 outgoing payments with refunded totals.
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Payments
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminPayment' } }
+  /api/v1/admin/customers/{customerId}/deposits:
+    get:
+      operationId: listCustomerDeposits
+      security:
+        - bearerAuth: []
+      description: Requires the admin or finance_user role. Latest 100 deposits into the customer's accounts.
+      parameters:
+        - { name: customerId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Deposits
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminDeposit' } }
+  /api/v1/payments/{paymentId}/dispute:
+    post:
+      operationId: openDispute
+      security:
+        - bearerAuth: []
+      description: The payer disputes a completed payment (chargeback simulation). One dispute per payment.
+      parameters:
+        - { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 200 }
+      responses:
+        '201':
+          description: Dispute opened
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentDispute' }
+        '409':
+          description: Payment not disputable or already disputed
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: getDispute
+      security:
+        - bearerAuth: []
+      description: Visible to the payer and staff. 404 when the payment has no dispute.
+      parameters:
+        - { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Dispute
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentDispute' }
+        '404':
+          description: Payment or dispute not found
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/admin/disputes:
+    get:
+      operationId: listDisputes
+      security:
+        - bearerAuth: []
+      description: Requires the admin, fraud_analyst or finance_user role.
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        '200':
+          description: Disputes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/PaymentDispute' } }
+  /api/v1/admin/disputes/{disputeId}/evidence:
+    post:
+      operationId: addDisputeEvidence
+      security:
+        - bearerAuth: []
+      description: Requires the admin, fraud_analyst or finance_user role. The first evidence entry moves an open dispute to under_review.
+      parameters:
+        - { name: disputeId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, minLength: 3, maxLength: 300 }
+      responses:
+        '200':
+          description: Dispute with the appended evidence
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentDispute' }
+        '409':
+          description: Dispute already decided
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/admin/disputes/{disputeId}/decision:
+    post:
+      operationId: decideDispute
+      security:
+        - bearerAuth: []
+      description: Requires the admin or fraud_analyst role. A lost decision upholds the chargeback and mirrors the payment's journals.
+      parameters:
+        - { name: disputeId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: { type: string, enum: [won, lost] }
+                resolution: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Decided dispute
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentDispute' }
+        '409':
+          description: Already decided, or the payment can no longer be charged back
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/admin/settlement-batches:
+    post:
+      operationId: createSettlementBatch
+      security:
+        - bearerAuth: []
+      description: Requires the admin, finance_user or operations_user role. Collects one business day's provider-settled payments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [businessDate, currency]
+              properties:
+                businessDate: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+                currency: { type: string, pattern: '^[A-Z]{3}$' }
+      responses:
+        '201':
+          description: Batch created (pending)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementBatchDetail' }
+        '422':
+          description: No settleable payments for the date
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+    get:
+      operationId: listSettlementBatches
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Batches, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/SettlementBatch' } }
+  /api/v1/admin/settlement-batches/{batchId}:
+    get:
+      operationId: getSettlementBatch
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Batch with its payment items
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementBatchDetail' }
+        '404':
+          description: Batch not found
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/admin/settlement-batches/{batchId}/process:
+    post:
+      operationId: processSettlementBatch
+      security:
+        - bearerAuth: []
+      description: Computes the net amount, generates the settlement file and completes the batch.
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Processed batch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettlementBatchDetail' }
+        '409':
+          description: Batch is not pending
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/admin/settlement-batches/{batchId}/file:
+    get:
+      operationId: getSettlementFile
+      security:
+        - bearerAuth: []
+      description: The generated CSV payout file; available after the batch completes.
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+        '409':
+          description: File not available before completion
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/admin/outbox/dead-letters:
+    get:
+      operationId: listDeadLetters
+      security:
+        - bearerAuth: []
+      description: Requires the admin or operations_user role. Events that exhausted their retries.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        '200':
+          description: Dead letters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/DeadLetter' } }
+  /api/v1/admin/outbox/dead-letters/{deadLetterId}/replay:
+    post:
+      operationId: replayDeadLetter
+      security:
+        - bearerAuth: []
+      description: Manual replay (spec section 19). Re-queues the event as a fresh outbox row and marks the dead letter.
+      parameters:
+        - { name: deadLetterId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Replay accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deadLetterId, newOutboxEventId]
+                properties:
+                  deadLetterId: { type: string, format: uuid }
+                  newOutboxEventId: { type: string, format: uuid }
+        '409':
+          description: Already replayed
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/admin/users:
+    get:
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      description: Requires the admin role (spec section 25, "Manage users").
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminCustomer' } }
+  /api/v1/admin/users/{userId}/roles:
+    patch:
+      operationId: updateUserRoles
+      security:
+        - bearerAuth: []
+      description: Requires the admin role. An admin cannot remove their own admin role.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                roles:
+                  type: array
+                  minItems: 1
+                  maxItems: 6
+                  items:
+                    type: string
+                    enum: [customer, admin, operations_user, fraud_analyst, compliance_officer, finance_user]
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminCustomer' }
+        '422':
+          description: Invalid roles or own-admin removal
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/aml/alerts/{alertId}/status:
+    patch:
+      operationId: updateAmlAlertStatus
+      security:
+        - bearerAuth: []
+      description: Requires the admin, fraud_analyst or compliance_officer role.
+      parameters:
+        - { name: alertId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [open, investigating, escalated, closed, false_positive]
+                note: { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: Updated alert status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string }
+        '404':
+          description: Alert not found
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+  /api/v1/reports/fraud:
+    get:
+      operationId: fraudReport
+      security:
+        - bearerAuth: []
+      description: Staff dashboard — cases by status, risk distribution, blocks, top rules.
+      responses:
+        '200':
+          description: Fraud dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [casesByStatus, riskDistribution, blockedPayments, topRules]
+                properties:
+                  casesByStatus: { type: object, additionalProperties: { type: integer } }
+                  riskDistribution: { type: object, additionalProperties: { type: integer } }
+                  blockedPayments: { type: integer }
+                  topRules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rule: { type: string }
+                        triggered: { type: integer }
+  /api/v1/reports/finance:
+    get:
+      operationId: financeReport
+      security:
+        - bearerAuth: []
+      description: Finance dashboard — settlement, reconciliation and volume totals.
+      responses:
+        '200':
+          description: Finance dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [settlement, reconciliation, transactionVolumeMinor, paymentCount]
+                properties:
+                  settlement: { type: object, additionalProperties: { type: integer } }
+                  reconciliation: { type: object, additionalProperties: { type: integer } }
+                  transactionVolumeMinor: { type: integer }
+                  paymentCount: { type: integer }
+  /api/v1/reports/{reportType}/export:
+    get:
+      operationId: exportReport
+      security:
+        - bearerAuth: []
+      description: CSV export (spec section 62). Fraud/AML/reconciliation/settlement require a staff role.
+      parameters:
+        - name: reportType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [daily-transactions, payment-success, fraud, aml, reconciliation, ledger, settlement]
+      responses:
+        '200':
+          description: CSV file
+          content:
+            text/csv:
+              schema: { type: string }
+        '404':
+          description: Unknown report type
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RefundRequest:
+      type: object
+      additionalProperties: false
+      required: [amountMinor]
+      properties:
+        amountMinor: { type: integer, format: int64, minimum: 1 }
+        reason: { type: [string, 'null'], maxLength: 200 }
+    ReversalRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 200 }
+    Refund:
+      type: object
+      required: [id, paymentId, amountMinor, currency, journalId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        reason: { type: [string, 'null'] }
+        journalId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+    RefundResult:
+      allOf:
+        - $ref: '#/components/schemas/Refund'
+        - type: object
+          required: [refundedTotalMinor, remainingMinor]
+          properties:
+            refundedTotalMinor: { type: integer, format: int64 }
+            remainingMinor: { type: integer, format: int64 }
+    RefundPage:
+      type: object
+      required: [items, refundedTotalMinor, remainingMinor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Refund' } }
+        refundedTotalMinor: { type: integer, format: int64 }
+        remainingMinor: { type: integer, format: int64 }
+    AdminPayment:
+      type: object
+      required: [id, status, amountMinor, currency, refundedMinor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        reference: { type: [string, 'null'] }
+        refundedMinor: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+    AdminDeposit:
+      type: object
+      required: [journalId, accountId, amountMinor, currency, postedAt, reversed]
+      properties:
+        journalId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string }
+        postedAt: { type: string, format: date-time }
+        reversed: { type: boolean }
+    DepositRequest:
+      type: object
+      additionalProperties: false
+      required: [amountMinor]
+      properties:
+        amountMinor: { type: integer, format: int64, minimum: 1 }
+        reference: { type: [string, 'null'], maxLength: 140 }
+    Deposit:
+      type: object
+      additionalProperties: false
+      required: [journalId, accountId, amountMinor, currency, balanceMinor, postedAt]
+      properties:
+        journalId: { type: string, format: uuid }
+        accountId: { type: string, format: uuid }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        reference: { type: [string, 'null'] }
+        balanceMinor: { type: integer, format: int64 }
+        postedAt: { type: string, format: date-time }
+    AdminAccount:
+      type: object
+      additionalProperties: false
+      required: [id, accountType, currency, status, balanceMinor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountType: { type: string }
+        currency: { type: string }
+        status: { type: string }
+        balanceMinor: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12, maxLength: 128, writeOnly: true }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1, maxLength: 128, writeOnly: true }
+    Customer:
+      type: object
+      additionalProperties: false
+      required: [id, email, status]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        status: { type: string, enum: [pending, active, suspended, blocked, closed] }
+    TokenResponse:
+      type: object
+      additionalProperties: false
+      required: [accessToken, tokenType, expiresIn, refreshToken]
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, description: Access token lifetime in seconds }
+        refreshToken: { type: string }
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string, minLength: 1, maxLength: 256, writeOnly: true }
+    CreateAccountRequest:
+      type: object
+      additionalProperties: false
+      required: [accountType, currency]
+      properties:
+        accountType: { type: string, enum: [checking, savings, wallet, merchant] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+    Account:
+      type: object
+      additionalProperties: false
+      required: [id, accountType, currency, status, ledgerBalanceMinor, availableBalanceMinor, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        accountType: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        status: { type: string, enum: [active, frozen, closed, suspended] }
+        ledgerBalanceMinor: { type: integer, format: int64 }
+        availableBalanceMinor: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+    AccountPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Account' }
+        nextCursor: { type: [string, 'null'] }
+    CreateBeneficiaryRequest:
+      type: object
+      additionalProperties: false
+      required: [destinationAccountId, label]
+      properties:
+        destinationAccountId: { type: string, format: uuid }
+        label: { type: string, minLength: 1, maxLength: 80 }
+    Beneficiary:
+      type: object
+      additionalProperties: false
+      required: [id, destinationAccountId, label, status, verifiedAt, coolingUntil, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        destinationAccountId: { type: string, format: uuid }
+        label: { type: string }
+        status: { type: string, enum: [pending_verification, cooling, active, disabled] }
+        verifiedAt: { type: [string, 'null'], format: date-time }
+        coolingUntil: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    BeneficiaryPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Beneficiary' }
+        nextCursor: { type: [string, 'null'] }
+    CreatePaymentRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceAccountId, beneficiaryId, amountMinor, currency]
+      properties:
+        sourceAccountId:
+          type: string
+          format: uuid
+        beneficiaryId:
+          type: string
+          format: uuid
+        amountMinor:
+          type: integer
+          format: int64
+          minimum: 1
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        reference:
+          type: [string, 'null']
+          maxLength: 140
+    Payment:
+      type: object
+      additionalProperties: false
+      required: [id, status, amountMinor, currency, createdAt, risk]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [initiated, pending, processing, completed, failed, cancelled, rejected, expired, reversed]
+          description: >-
+            pending means held for fraud review (risk.decision = review): the amount has left the
+            source account for a clearing ledger and settles when the fraud case is reviewed.
+            reversed means staff corrected a completed payment by mirroring its journal entries.
+        amountMinor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        createdAt:
+          type: string
+          format: date-time
+        reference:
+          type: [string, 'null']
+          maxLength: 140
+        risk:
+          type: object
+          additionalProperties: false
+          required: [score, level, decision]
+          properties:
+            score:
+              type: integer
+              minimum: 0
+              maximum: 100
+            level:
+              type: string
+              enum: [low, medium, high, critical]
+            decision:
+              type: string
+              enum: [allow, review, block]
+            reasons:
+              type: array
+              items: { type: string }
+    PaymentPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Payment' }
+        nextCursor: { type: [string, 'null'] }
+    CreateKycRequest:
+      type: object
+      additionalProperties: false
+      required: [fullName, country]
+      properties:
+        fullName: { type: string, minLength: 1, maxLength: 120 }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+    AddKycDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [documentType, contentBase64]
+      properties:
+        documentType: { type: string, minLength: 1 }
+        contentBase64: { type: string, minLength: 1, description: Base64-encoded document content }
+    KycDocument:
+      type: object
+      additionalProperties: false
+      required: [id, documentType, blobPath, status, uploadedAt]
+      properties:
+        id: { type: string, format: uuid }
+        documentType: { type: string }
+        blobPath: { type: string }
+        status: { type: string }
+        uploadedAt: { type: string, format: date-time }
+    KycApplication:
+      type: object
+      additionalProperties: false
+      required: [id, status, fullName, country, rejectionReason, submittedAt, decidedAt, createdAt, documents]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, under_review, approved, rejected] }
+        fullName: { type: string }
+        country: { type: string, pattern: '^[A-Z]{2}$' }
+        rejectionReason: { type: [string, 'null'] }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/KycDocument' }
+    KycApplicationPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/KycApplication' }
+    KycReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [approve]
+      properties:
+        approve: { type: boolean }
+        reason: { type: [string, 'null'], maxLength: 300 }
+    Transaction:
+      type: object
+      additionalProperties: false
+      required: [id, paymentId, accountId, direction, counterpartyAccountId, amountMinor, currency, occurredAt, status, reference]
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: [string, 'null'], format: uuid }
+        accountId: { type: [string, 'null'], format: uuid }
+        direction: { type: string, enum: [debit, credit] }
+        counterpartyAccountId: { type: [string, 'null'], format: uuid }
+        amountMinor: { type: integer, format: int64 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        occurredAt: { type: string, format: date-time }
+        status: { type: string }
+        reference: { type: [string, 'null'] }
+    TransactionPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Transaction' }
+        nextCursor: { type: [string, 'null'] }
+    LedgerEntry:
+      type: object
+      additionalProperties: false
+      required: [journalId, postedAt, businessReference, side, amountMinor]
+      properties:
+        journalId: { type: string, format: uuid }
+        postedAt: { type: string, format: date-time }
+        businessReference: { type: string }
+        side: { type: string, enum: [debit, credit] }
+        amountMinor: { type: integer, format: int64 }
+    LedgerAccountStatement:
+      type: object
+      additionalProperties: false
+      required: [accountId, currency, balanceMinor, entries]
+      properties:
+        accountId: { type: string, format: uuid }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        balanceMinor: { type: integer, format: int64 }
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/LedgerEntry' }
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, channel, eventType, subject, body, status, sentAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        channel: { type: string }
+        eventType: { type: string }
+        subject: { type: string }
+        body: { type: string }
+        status: { type: string }
+        sentAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    NotificationPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Notification' }
+        nextCursor: { type: [string, 'null'] }
+    AgentStatus:
+      type: object
+      additionalProperties: false
+      required: [enabled, provider, model]
+      properties:
+        enabled: { type: boolean }
+        provider: { type: string }
+        model: { type: string }
+    InvestigationStep:
+      type: object
+      additionalProperties: false
+      required: [tool, label]
+      properties:
+        tool: { type: string }
+        label: { type: string }
+    Investigation:
+      type: object
+      additionalProperties: false
+      required: [caseId, recommendation, confidence, summary, keyFindings, suggestedNote, steps, model, generatedAt]
+      properties:
+        caseId: { type: string, format: uuid }
+        recommendation: { type: string, enum: [false_positive, closed, escalated] }
+        confidence: { type: string, enum: [low, medium, high] }
+        summary: { type: string }
+        keyFindings:
+          type: array
+          items: { type: string }
+        suggestedNote: { type: string, maxLength: 200 }
+        steps:
+          type: array
+          items: { $ref: '#/components/schemas/InvestigationStep' }
+        model: { type: string }
+        generatedAt: { type: string, format: date-time }
+    FraudCase:
+      type: object
+      additionalProperties: false
+      required: [id, paymentId, customerId, score, level, status, reasons, resolution, reviewedAt, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: [string, 'null'], format: uuid }
+        customerId: { type: string, format: uuid }
+        score: { type: integer, minimum: 0, maximum: 100 }
+        level: { type: string, enum: [low, medium, high, critical] }
+        status: { type: string, enum: [open, investigating, escalated, closed, false_positive] }
+        reasons:
+          type: array
+          items: { type: string }
+        resolution: { type: [string, 'null'] }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    FraudCasePage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FraudCase' }
+        nextCursor: { type: [string, 'null'] }
+    FraudCaseReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [resolution]
+      properties:
+        resolution: { type: string, enum: [closed, false_positive, escalated] }
+        note: { type: [string, 'null'], maxLength: 200 }
+    AmlAlert:
+      type: object
+      additionalProperties: false
+      required: [id, customerId, paymentId, ruleCode, status, details, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        paymentId: { type: [string, 'null'], format: uuid }
+        ruleCode: { type: string }
+        status: { type: string }
+        details: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+    AmlAlertPage:
+      type: object
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AmlAlert' }
+        nextCursor: { type: [string, 'null'] }
+    ReconciliationRecord:
+      type: object
+      additionalProperties: false
+      required: [paymentId, status, internalStatus, externalStatus, internalAmountMinor, externalAmountMinor, externalReference]
+      properties:
+        paymentId: { type: string, format: uuid }
+        status: { type: string, enum: [matched, amount_mismatch, status_mismatch, missing_external] }
+        internalStatus: { type: string }
+        externalStatus: { type: [string, 'null'] }
+        internalAmountMinor: { type: integer, format: int64 }
+        externalAmountMinor: { type: [integer, 'null'], format: int64 }
+        externalReference: { type: [string, 'null'] }
+    ReconciliationRunResponse:
+      type: object
+      additionalProperties: false
+      required: [runId, matched, amountMismatch, statusMismatch, missingExternal, records]
+      properties:
+        runId: { type: string, format: uuid }
+        matched: { type: integer }
+        amountMismatch: { type: integer }
+        statusMismatch: { type: integer }
+        missingExternal: { type: integer }
+        records:
+          type: array
+          items: { $ref: '#/components/schemas/ReconciliationRecord' }
+    ReconciliationRunView:
+      type: object
+      additionalProperties: false
+      required: [id, startedAt, finishedAt, matched, amountMismatch, statusMismatch, missingExternal]
+      properties:
+        id: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+        matched: { type: integer }
+        amountMismatch: { type: integer }
+        statusMismatch: { type: integer }
+        missingExternal: { type: integer }
+    ReconciliationRunPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ReconciliationRunView' }
+    DashboardTotals:
+      type: object
+      additionalProperties: false
+      required: [payments, completed, failed, blocked]
+      properties:
+        payments: { type: integer }
+        completed: { type: integer }
+        failed: { type: integer }
+        blocked: { type: integer }
+    CategoryCount:
+      type: object
+      additionalProperties: false
+      required: [open, total]
+      properties:
+        open: { type: integer }
+        total: { type: integer }
+    MonthVolume:
+      type: object
+      additionalProperties: false
+      description: >-
+        One month's volume in one currency. Amounts in different currencies are never summed:
+        every currency with activity in the window has its own zero-filled series, ordered by
+        month then currency.
+      required: [month, currency, count, volumeMinor]
+      properties:
+        month: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        count: { type: integer }
+        volumeMinor: { type: integer, format: int64 }
+    DashboardView:
+      type: object
+      additionalProperties: false
+      required: [totals, successRate, fraudCases, amlAlerts, monthlyVolume]
+      properties:
+        totals: { $ref: '#/components/schemas/DashboardTotals' }
+        successRate: { type: [number, 'null'] }
+        fraudCases: { $ref: '#/components/schemas/CategoryCount' }
+        amlAlerts: { $ref: '#/components/schemas/CategoryCount' }
+        monthlyVolume:
+          type: array
+          items: { $ref: '#/components/schemas/MonthVolume' }
+    DayVolume:
+      type: object
+      additionalProperties: false
+      description: One day's volume in one currency; same per-currency series rules as MonthVolume.
+      required: [day, currency, count, volumeMinor]
+      properties:
+        day: { type: string }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        count: { type: integer }
+        volumeMinor: { type: integer, format: int64 }
+    TransactionsReport:
+      type: object
+      additionalProperties: false
+      required: [series]
+      properties:
+        series:
+          type: array
+          items: { $ref: '#/components/schemas/DayVolume' }
+    AdminCustomer:
+      type: object
+      additionalProperties: false
+      required: [id, email, status, roles, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        status: { type: string, enum: [pending, active, suspended, blocked, closed] }
+        roles:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+    AdminCustomerPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminCustomer' }
+    CustomerStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [pending, active, suspended, blocked, closed] }
+    FraudRule:
+      type: object
+      additionalProperties: false
+      required: [id, code, description, thresholdMinor, weight, enabled]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        description: { type: string }
+        thresholdMinor: { type: [integer, 'null'], format: int64 }
+        weight: { type: integer, minimum: 0, maximum: 1000 }
+        enabled: { type: boolean }
+    FraudRulePage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/FraudRule' }
+    FraudRulePatchRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean }
+        weight: { type: integer, minimum: 0, maximum: 1000 }
+        thresholdMinor: { type: integer, format: int64, minimum: 0 }
+    AuditLog:
+      type: object
+      additionalProperties: false
+      required: [id, actorId, action, entityType, entityId, ipAddress, correlationId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        actorId: { type: [string, 'null'], format: uuid }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: [string, 'null'], format: uuid }
+        ipAddress: { type: [string, 'null'] }
+        correlationId: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    AuditLogPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AuditLog' }
+    AccountStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [active, frozen, suspended, closed] }
+    AccountStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [id, status]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [active, frozen, suspended, closed] }
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, traceId]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        detail: { type: [string, 'null'] }
+        traceId: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, code]
+            properties:
+              field: { type: string }
+              code: { type: string }
+    DisputeEvidence:
+      type: object
+      required: [note, addedBy, addedAt]
+      properties:
+        note: { type: string }
+        addedBy: { type: string, format: uuid }
+        addedAt: { type: string, format: date-time }
+    PaymentDispute:
+      type: object
+      required: [id, paymentId, customerId, status, reason, evidence, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        paymentId: { type: string, format: uuid }
+        customerId: { type: string, format: uuid }
+        status: { type: string, enum: [open, under_review, won, lost] }
+        reason: { type: string }
+        evidence:
+          type: array
+          items: { $ref: '#/components/schemas/DisputeEvidence' }
+        decidedBy: { type: [string, 'null'], format: uuid }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        resolution: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+    SettlementItem:
+      type: object
+      required: [paymentId, amountMinor, feeMinor]
+      properties:
+        paymentId: { type: string, format: uuid }
+        amountMinor: { type: integer }
+        feeMinor: { type: integer }
+    SettlementBatch:
+      type: object
+      required: [id, businessDate, currency, status, totalMinor, feeMinor, netMinor, paymentCount, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        businessDate: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        currency: { type: string }
+        status: { type: string, enum: [pending, processing, completed, failed] }
+        totalMinor: { type: integer }
+        feeMinor: { type: integer }
+        netMinor: { type: integer }
+        paymentCount: { type: integer }
+        failureReason: { type: [string, 'null'] }
+        processedAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+    SettlementBatchDetail:
+      allOf:
+        - $ref: '#/components/schemas/SettlementBatch'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/SettlementItem' }
+    DeadLetter:
+      type: object
+      required: [id, outboxEventId, eventType, failureReason, replayed, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        outboxEventId: { type: string, format: uuid }
+        eventType: { type: string }
+        failureReason: { type: string }
+        replayed: { type: boolean }
+        createdAt: { type: string, format: date-time }

@@ -1,0 +1,175 @@
+name: Contract compatibility
+
+on:
+  push:
+    paths:
+      - "contracts/**"
+      - "python-backend/**"
+      - "dotnet-backend/**"
+      - "tests/**"
+      - ".github/workflows/contract.yml"
+  pull_request:
+    paths:
+      - "contracts/**"
+      - "python-backend/**"
+      - "dotnet-backend/**"
+      - "tests/**"
+
+jobs:
+  # Static gate: contracts/openapi.yaml vs both backends' declared routes. No services needed.
+  static-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: python-backend/pyproject.toml
+      - name: Install dependencies
+        run: |
+          pip install -e "../python-backend[dev]"
+          pip install pyyaml
+        working-directory: tests
+      - name: Contract tests (static)
+        run: python -m pytest -q
+        working-directory: tests
+
+  # Financial invariants (spec section 87): debits == credits, idempotent retry, failed-write
+  # atomicity, concurrent-transfer safety — against a real PostgreSQL.
+  financial-invariants:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fincore
+          POSTGRES_PASSWORD: fincore
+          POSTGRES_DB: fincore_it
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fincore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: python-backend/pyproject.toml
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+        working-directory: python-backend
+      - name: Apply migrations
+        run: python -m alembic upgrade head
+        working-directory: python-backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://fincore:fincore@localhost:5432/fincore_it
+      - name: Invariant and integration tests
+        run: pytest -q
+        working-directory: python-backend
+        env:
+          FINCORE_TEST_DATABASE_URL: postgresql+asyncpg://fincore:fincore@localhost:5432/fincore_it
+
+  # .NET mirror of the same scenarios against the shared Alembic schema.
+  dotnet-invariants:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fincore
+          POSTGRES_PASSWORD: fincore
+          POSTGRES_DB: fincore_it
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fincore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply migrations (shared schema owner)
+        run: |
+          pip install alembic "sqlalchemy[asyncio]" asyncpg
+          python -m alembic upgrade head
+        working-directory: python-backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://fincore:fincore@localhost:5432/fincore_it
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build and test
+        run: dotnet test FinCore.sln -v q --nologo
+        working-directory: dotnet-backend
+        env:
+          FINCORE_TEST_CONNECTION_STRING: Host=localhost;Port=5432;Database=fincore_it;Username=fincore;Password=fincore
+
+  # Live contract tests: boot both APIs against the migrated schema and compare responses.
+  live-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fincore
+          POSTGRES_PASSWORD: fincore
+          POSTGRES_DB: fincore_live
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fincore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: python-backend/pyproject.toml
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+          pip install pyyaml
+        working-directory: python-backend
+      - name: Apply migrations
+        run: python -m alembic upgrade head
+        working-directory: python-backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://fincore:fincore@localhost:5432/fincore_live
+      - name: Start Python API
+        run: |
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/python-api.log 2>&1 &
+          sleep 5
+        working-directory: python-backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://fincore:fincore@localhost:5432/fincore_live
+          OUTBOX_WORKER_ENABLED: "false"
+          RATE_LIMIT_ENABLED: "false"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build .NET API
+        run: dotnet build FinCore.sln -v q --nologo
+        working-directory: dotnet-backend
+      - name: Start .NET API
+        run: |
+          nohup dotnet run --project src/FinCore.Api --no-build --urls http://127.0.0.1:5000 > /tmp/dotnet-api.log 2>&1 &
+          sleep 12
+        working-directory: dotnet-backend
+        env:
+          ConnectionStrings__FinCore: Host=localhost;Port=5432;Database=fincore_live;Username=fincore;Password=fincore
+          OUTBOX_WORKER_ENABLED: "false"
+          RATE_LIMIT_ENABLED: "false"
+      - name: Live contract tests
+        run: python -m pytest -q
+        working-directory: tests
+        env:
+          FINCORE_PYTHON_URL: http://127.0.0.1:8000
+          FINCORE_DOTNET_URL: http://127.0.0.1:5000

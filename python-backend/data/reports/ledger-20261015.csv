@@ -1,0 +1,5 @@
+business_reference,currency,posted_at,side,amount_minor
+funding:c74eabeaaf594e0cb6e435c1f1712283,USD,2026-10-15 18:49:20.976544+00:00,debit,100000
+funding:c74eabeaaf594e0cb6e435c1f1712283,USD,2026-10-15 18:49:20.976544+00:00,credit,100000
+payment:fa211cbb-6546-4338-9c77-7a22aee67053,USD,2026-10-15 18:49:21.109599+00:00,debit,25000
+payment:fa211cbb-6546-4338-9c77-7a22aee67053,USD,2026-10-15 18:49:21.109599+00:00,credit,25000

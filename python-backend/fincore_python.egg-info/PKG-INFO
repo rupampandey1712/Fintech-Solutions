@@ -1,0 +1,29 @@
+Metadata-Version: 2.4
+Name: fincore-python
+Version: 0.1.0
+Summary: FinCore fintech platform Python API
+Requires-Python: >=3.12
+Requires-Dist: fastapi<1.0,>=0.115
+Requires-Dist: uvicorn[standard]<1.0,>=0.30
+Requires-Dist: pydantic-settings<3.0,>=2.5
+Requires-Dist: email-validator<3.0,>=2.2
+Requires-Dist: PyJWT<3.0,>=2.9
+Requires-Dist: sqlalchemy[asyncio]<3.0,>=2.0
+Requires-Dist: asyncpg<1.0,>=0.29
+Requires-Dist: alembic<2.0,>=1.13
+Requires-Dist: structlog<26.0,>=24.4
+Requires-Dist: opentelemetry-api<2.0,>=1.27
+Requires-Dist: opentelemetry-sdk<2.0,>=1.27
+Requires-Dist: opentelemetry-instrumentation-fastapi<1.0,>=0.48b0
+Requires-Dist: opentelemetry-instrumentation-asyncpg<1.0,>=0.48b0
+Requires-Dist: opentelemetry-instrumentation-redis<1.0,>=0.48b0
+Requires-Dist: opentelemetry-exporter-otlp-proto-grpc<2.0,>=1.27
+Requires-Dist: azure-servicebus<8.0,>=7.14
+Requires-Dist: azure-storage-blob[aio]<13.0,>=12.24
+Requires-Dist: redis<7.0,>=5.0
+Requires-Dist: httpx<1.0,>=0.27
+Provides-Extra: dev
+Requires-Dist: pytest<9.0,>=8.3; extra == "dev"
+Requires-Dist: pytest-asyncio<2.0,>=0.24; extra == "dev"
+Requires-Dist: httpx<1.0,>=0.27; extra == "dev"
+Requires-Dist: ruff<1.0,>=0.6; extra == "dev"

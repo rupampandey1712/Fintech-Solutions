@@ -1,0 +1,37 @@
+name: .NET backend
+
+on:
+  push:
+    paths:
+      - "dotnet-backend/**"
+  pull_request:
+    paths:
+      - "dotnet-backend/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dotnet-backend
+    env:
+      FINCORE_TEST_CONNECTION_STRING: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore
+      - name: Build
+        run: dotnet build -c Release --no-restore
+      - name: Test
+        run: dotnet test -c Release --no-build
+      # Spec section 50: a security scan stage over the restored package graph.
+      - name: Security scan
+        run: |
+          dotnet list package --vulnerable --include-transitive > vulnerable.txt || true
+          cat vulnerable.txt
+          if grep -q "has the following vulnerable packages" vulnerable.txt; then
+            echo "::warning::Vulnerable packages detected; review the log above"
+          fi
