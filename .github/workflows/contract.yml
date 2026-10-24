@@ -96,7 +96,7 @@ jobs:
           python-version: "3.12"
       - name: Apply migrations (shared schema owner)
         run: |
-          pip install alembic "sqlalchemy[asyncio]" asyncpg
+          pip install -e .
           python -m alembic upgrade head
         working-directory: python-backend
         env:
